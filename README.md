@@ -1,2 +1,5 @@
-# slurm_submit
-SLURM submit scripts for different programs
+# SLURM submit scripts
+
+SLURM submit scripts for different QM programs such as MOPAC
+
+
