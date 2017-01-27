@@ -1,0 +1,99 @@
+#!/bin/bash
+
+# Batch submit for calculating a lot of fast mopac calculations
+
+PARTITION=coms
+NCPUS=8
+
+mopac_path="/opt/mopac"
+intel_path="/opt/intel/composer_xe_2013.1.117/compiler/lib/intel64"
+
+# Check ssh key is setup
+ssh_pri=`ssh-keygen -y -f ~/.ssh/id_rsa`
+ssh_pub=`cat ~/.ssh/id_rsa.pub`
+if [[ $ssh_pub != $ssh_pri*  ]]; then
+
+    echo
+    echo "SSH key not setup. Please run 'ssh-keygen' in the terminal,"
+    echo "to setup a key-pair (ssh with no password), before running this"
+    echo "script"
+    echo
+
+    exit 4
+fi
+
+PWD=`pwd`
+JOB=${PWD##*/}
+SUBMIT=qsub.tmp
+host=$HOSTNAME
+
+tar -czf batch_mop_files.tar.gz *.mop
+
+cat > $SUBMIT <<!EOF
+#!/bin/sh
+#SBATCH --job-name=$JOB
+#SBATCH --nodes=1
+#SBATCH --cpus-per-task=$NCPUS
+#SBATCH --ntasks=1
+#SBATCH --error=$PWD/$JOB\_%j.stderr
+#SBATCH --output=$PWD/$JOB\_%j.stdout
+#SBATCH --time=10:00:00
+#SBATCH --partition=$PARTITION
+#SBATCH --no-requeue
+
+start=\`date +%s\`
+
+nodename=\$HOSTNAME
+echo 0 "Running on \$nodename"
+echo 0 "un-tar input files"
+
+mkdir /scratch/\$SLURM_JOB_ID
+cd /scratch/\$SLURM_JOB_ID
+cp $PWD/batch_mop_files.tar.gz .
+tar -xzf batch_mop_files.tar.gz
+
+end=\`date +%s\`
+runtime=\$((end-start))
+echo \$runtime "copy mopac"
+
+cp -r $mopac_path .
+cp -r $intel_path .
+export LD_LIBRARY_PATH=/scratch/\$SLURM_JOB_ID/intel64:$LD_LIBRARY_PATH
+export MKL_NUM_THREADS=1
+
+end=\`date +%s\`
+runtime=\$((end-start))
+echo \$runtime "run mopac"
+
+ls -f *.mop | parallel -j$NCPUS "/scratch/\$SLURM_JOB_ID/mopac/MOPAC2016.exe {} > /dev/null 2> /dev/null"
+
+end=\`date +%s\`
+runtime=\$((end-start))
+echo \$runtime "tar output"
+
+tar -czf batch_mop_out.tar.gz *.out
+cp batch_mop_out.tar.gz $PWD
+
+end=\`date +%s\`
+runtime=\$((end-start))
+echo \$runtime "untar in $PWD"
+
+ssh sunray "cd $PWD && tar xzf batch_mop_out.tar.gz"
+
+end=\`date +%s\`
+runtime=\$((end-start))
+echo \$runtime "done"
+
+convertsecs() {
+    ((h=\${1}/3600))
+    ((m=(\${1}%3600)/60))
+    ((s=\${1}%60))
+    printf "%02d:%02d:%02d\n" \$h \$m \$s
+}
+
+convertsecs(\$runtime)
+
+!EOF
+
+sbatch $SUBMIT
+
